@@ -1,0 +1,59 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function userDoc() { return get(/databases/$(database)/documents/users/$(request.auth.uid)); }
+    function isAdmin() { return signedIn() && userDoc().data.role == 'admin' && userDoc().data.active == true; }
+    function isMember() { return signedIn() && userDoc().data.role in ['admin', 'member'] && userDoc().data.active == true; }
+
+    match /users/{userId} {
+      allow read: if isMember();
+      allow create: if isAdmin();
+      allow update: if isAdmin() || (signedIn() && request.auth.uid == userId
+        && request.resource.data.role == resource.data.role
+        && request.resource.data.email == resource.data.email);
+      allow delete: if isAdmin();
+    }
+    match /pages/{pageId} {
+      allow read: if isMember();
+      allow create, update, delete: if isAdmin();
+    }
+    match /components/{componentId} {
+      allow read: if isMember();
+      allow create: if isMember();
+      allow update, delete: if isAdmin()
+        || (isMember() && resource.data.createdBy == request.auth.uid);
+    }
+    match /revisions/{revisionId} {
+      allow read: if isMember();
+      allow create: if isMember();
+      // Only admin reviews (accept/reject); author may cancel own pending revision
+      allow update: if isAdmin()
+        || (isMember() && resource.data.createdBy == request.auth.uid
+            && resource.data.status == 'pending'
+            && request.resource.data.status == 'cancelled');
+      allow delete: if isAdmin();
+    }
+    match /files/{fileId} {
+      allow read: if isMember();
+      allow create: if isMember();
+      allow update, delete: if isAdmin()
+        || (isMember() && resource.data.uploadedBy == request.auth.uid);
+    }
+    match /activityLogs/{logId} {
+      allow read: if isMember();
+      allow create: if isMember();
+      allow update, delete: if isAdmin();
+    }
+    match /notifications/{notifId} {
+      allow read: if signedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isMember();
+      allow update: if signedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow delete: if isAdmin();
+    }
+    match /settings/{docId} {
+      allow read: if isMember();
+      allow write: if isAdmin();
+    }
+  }
+}
