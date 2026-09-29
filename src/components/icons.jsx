@@ -1,4 +1,6 @@
 // Minimal Word-style SVG icon set (stroke icons, no emoji).
+import React from 'react';
+
 const base = {
   width: 18, height: 18, viewBox: '0 0 24 24', fill: 'none',
   stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round'
@@ -6,7 +8,7 @@ const base = {
 
 const paths = {
   bold: <path d="M6 4h8a4 4 0 0 1 0 8H6z M6 12h9a4 4 0 0 1 0 8H6z" />,
-  italic: <line x1="19" y1="4" x2="10" y2="4" /><line x1="14" y1="20" x2="5" y2="20" /><line x1="15" y1="4" x2="9" y2="20" />,
+  italic: <React.Fragment><line x1="19" y1="4" x2="10" y2="4" /><line x1="14" y1="20" x2="5" y2="20" /><line x1="15" y1="4" x2="9" y2="20" /></React.Fragment>,
   underline: <path d="M6 3v7a6 6 0 0 0 12 0V3 M4 21h16" />,
   highlight: <path d="M9 11l-5 5v3h3l5-5 M9 11l4 4 M13 7l4 4 M5 21h14" />,
   h1: <React.Fragment><path d="M4 5v14 M12 5v14 M4 12h8" /><path d="M15 18l6-11 M17 14h4" /></React.Fragment>,
@@ -27,13 +29,11 @@ const paths = {
   rowPlus: <React.Fragment><rect x="3" y="4" width="18" height="16" rx="1" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="10" y1="16" x2="14" y2="16" /><line x1="12" y1="14" x2="12" y2="18" /></React.Fragment>,
   trash: <path d="M4 7h16 M9 7V4h6v3 M6 7l1 14h10l1-14 M10 11v6 M14 11v6" />,
   download: <path d="M12 3v12 M6 11l6 6 6-6 M4 21h16" />,
-  eye: <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" /><circle cx="12" cy="12" r="3" />,
+  eye: <React.Fragment><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" /><circle cx="12" cy="12" r="3" /></React.Fragment>,
   plus: <path d="M12 5v14 M5 12h14" />,
   check: <path d="M4 12l5 5L20 6" />,
   x: <path d="M6 6l12 12 M18 6L6 18" />
 };
-
-import React from 'react';
 
 export default function Icon({ name }) {
   return <svg {...base}>{paths[name] || null}</svg>;
