@@ -34,6 +34,34 @@ export default function DocEditor({ value, onChange, editable = true }) {
       TextStyle, Color, FontSize
     ],
     content: value || '<p></p>',
+    editorProps: {
+      // Downscale pasted images (canvas -> JPEG) so docs stay far below
+      // the 1MB Firestore limit; otherwise saves fail while the writer
+      // still sees the text locally.
+      handlePaste: (view, event) => {
+        const files = [...(event.clipboardData?.files || [])].filter((f) => f.type.startsWith('image/'));
+        if (!files.length) return false;
+        event.preventDefault();
+        files.forEach((f) => {
+          const rd = new FileReader();
+          rd.onload = () => {
+            const img = new Image();
+            img.onload = () => {
+              const max = 1000;
+              const sc = Math.min(1, max / Math.max(img.width, img.height));
+              const c = document.createElement('canvas');
+              c.width = Math.max(1, Math.round(img.width * sc));
+              c.height = Math.max(1, Math.round(img.height * sc));
+              c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+              view.editor.chain().focus().setImage({ src: c.toDataURL('image/jpeg', 0.82) }).run();
+            };
+            img.src = rd.result;
+          };
+          rd.readAsDataURL(f);
+        });
+        return true;
+      }
+    },
     onUpdate: ({ editor }) => {
       onChange && onChange(editor.getHTML());
       measure();

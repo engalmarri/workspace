@@ -15,12 +15,21 @@ import { logActivity, notifyUser, touchPage } from '../services/helpers.js';
 import { exportToDocx, exportToPdf } from '../utils/exportDoc.js';
 
 const draftKey = (pageId) => `gws-draft-${pageId}`;
+const isEmptyHtml = (h) => !(h || '').replace(/<[^>]*>/g, '').trim();
+
+function fmtTime(ts) {
+  try {
+    const d = ts?.toDate ? ts.toDate() : null;
+    return d ? d.toLocaleString() : '—';
+  } catch { return '—'; }
+}
 
 export default function PageView() {
   const { id } = useParams();
   const { user, profile, isAdmin } = useAuth();
   const [page, setPage] = useState(null);
   const [docComp, setDocComp] = useState(null);
+  const [docCount, setDocCount] = useState(1);
   const [html, setHtml] = useState('');
   const [saveState, setSaveState] = useState('Saved');
   const [images, setImages] = useState([]);
@@ -29,11 +38,15 @@ export default function PageView() {
   const [revisions, setRevisions] = useState([]);
   const [suggestMode, setSuggestMode] = useState(false);
   const [draft, setDraft] = useState('');
+  const [draftState, setDraftState] = useState('');
   const [notice, setNotice] = useState('');
   const [importing, setImporting] = useState(false);
   const timer = useRef(null);
+  const draftTimer = useRef(null);
   const docIdRef = useRef(null);      // single source of truth for the doc id (no stale state)
   const creatingRef = useRef(null);   // in-flight creation promise (prevents duplicate docs)
+  const draftRevIdRef = useRef(null); // member's auto-saved draft revision id
+  const origRef = useRef('');         // official html snapshot when suggestion started
   const htmlRef = useRef('');
   const fileInputRef = useRef(null);
 
@@ -43,7 +56,14 @@ export default function PageView() {
     const cs = await getDocs(query(collection(db, 'components'), where('pageId', '==', id)));
     const list = cs.docs.map((d) => ({ id: d.id, ...d.data() }));
     const docs = list.filter((c) => c.type === 'doc');
-    const d = docs[0];
+    // Newest first; prefer the newest NON-EMPTY copy so parallel edits never hide content
+    docs.sort((a, b) => {
+      const ta = a.updatedAt?.toMillis ? a.updatedAt.toMillis() : 0;
+      const tb = b.updatedAt?.toMillis ? b.updatedAt.toMillis() : 0;
+      return tb - ta;
+    });
+    setDocCount(docs.length);
+    const d = docs.find((x) => !isEmptyHtml(x.content?.html)) || docs[0];
     if (d) {
       docIdRef.current = d.id;
       setDocComp(d);
@@ -51,7 +71,7 @@ export default function PageView() {
       // Safety net: restore unsaved browser backup if the official copy is empty
       try {
         const bak = JSON.parse(localStorage.getItem(draftKey(id)) || 'null');
-        if ((!official || !official.replace(/<[^>]*>/g, '').trim()) && bak && bak.html && bak.html.replace(/<[^>]*>/g, '').trim()) {
+        if (isEmptyHtml(official) && bak && !isEmptyHtml(bak.html)) {
           official = bak.html;
           setNotice('Recovered unsaved changes from this browser. Press Save now to keep them.');
         }
@@ -71,10 +91,34 @@ export default function PageView() {
   useEffect(() => {
     docIdRef.current = null;
     creatingRef.current = null;
+    draftRevIdRef.current = null;
     setNotice('');
+    setSuggestMode(false);
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  // Admin: merge duplicate official docs (keeps every non-empty version, newest last)
+  const mergeDuplicates = async () => {
+    const cs = await getDocs(query(collection(db, 'components'), where('pageId', '==', id)));
+    const docs = cs.docs.map((d) => ({ id: d.id, ...d.data() })).filter((c) => c.type === 'doc');
+    if (docs.length < 2) return;
+    docs.sort((a, b) => {
+      const ta = a.updatedAt?.toMillis ? a.updatedAt.toMillis() : 0;
+      const tb = b.updatedAt?.toMillis ? b.updatedAt.toMillis() : 0;
+      return ta - tb;
+    });
+    const seen = new Set();
+    const merged = docs.map((x) => x.content?.html || '').filter((h) => {
+      if (isEmptyHtml(h) || seen.has(h)) return false;
+      seen.add(h); return true;
+    }).join('<hr/>');
+    const keeper = docs[docs.length - 1];
+    await updateDoc(doc(db, 'components', keeper.id), { content: { html: merged }, updatedAt: serverTimestamp(), updatedByName: profile?.displayName });
+    for (const x of docs.slice(0, -1)) await deleteDoc(doc(db, 'components', x.id));
+    await logActivity({ userId: user.uid, userName: profile?.displayName, action: 'merged duplicate documents', targetType: 'page', targetId: id, targetTitle: page?.title });
+    load();
+  };
 
   const ensureDoc = async () => {
     if (docIdRef.current) return docIdRef.current;
@@ -83,7 +127,7 @@ export default function PageView() {
       creatingRef.current = addDoc(collection(db, 'components'), {
         pageId: id, type: 'doc', content: { html: htmlRef.current || '' },
         createdBy: user.uid, createdByName: profile?.displayName,
-        createdAt: serverTimestamp(), updatedAt: serverTimestamp()
+        createdAt: serverTimestamp(), updatedAt: serverTimestamp(), updatedByName: profile?.displayName
       }).then((r) => {
         docIdRef.current = r.id;
         setDocComp({ id: r.id, pageId: id, type: 'doc', content: { html: htmlRef.current || '' }, createdByName: profile?.displayName });
@@ -97,7 +141,7 @@ export default function PageView() {
   const persist = async (v) => {
     const docId = await ensureDoc();
     if (!docId) return false;
-    await updateDoc(doc(db, 'components', docId), { content: { html: v }, updatedAt: serverTimestamp() });
+    await updateDoc(doc(db, 'components', docId), { content: { html: v }, updatedAt: serverTimestamp(), updatedByName: profile?.displayName });
     await touchPage(id);
     await logActivity({ userId: user.uid, userName: profile?.displayName, action: 'edited page', targetType: 'page', targetId: id, targetTitle: page?.title });
     try { localStorage.removeItem(draftKey(id)); } catch { /* ignore */ }
@@ -128,7 +172,60 @@ export default function PageView() {
       await persist(htmlRef.current);
       setSaveState('Saved');
       setNotice('');
+      load();
     } catch { setSaveState('Save failed — check connection and press Save now'); }
+  };
+
+  // ---- Member suggestion drafts: auto-saved to Firebase, visible to everyone ----
+  const openSuggest = () => {
+    const mine = revisions.find((r) => r.createdBy === user.uid && r.status === 'pending' && r.submitted === false);
+    origRef.current = htmlRef.current;
+    if (mine) { draftRevIdRef.current = mine.id; setDraft(mine.proposedContent); }
+    else { draftRevIdRef.current = null; setDraft(htmlRef.current); }
+    setDraftState(mine ? 'Draft restored from cloud' : '');
+    setSuggestMode(true);
+  };
+
+  const onDraftChange = (v) => {
+    setDraft(v);
+    if (!docIdRef.current) return;
+    setDraftState('Saving draft...');
+    clearTimeout(draftTimer.current);
+    draftTimer.current = setTimeout(() => upsertDraft(v, false), 1500);
+  };
+
+  const upsertDraft = async (v, submit) => {
+    try {
+      if (draftRevIdRef.current) {
+        await updateDoc(doc(db, 'revisions', draftRevIdRef.current), { proposedContent: v, submitted: submit, updatedAt: serverTimestamp() });
+      } else {
+        const r = await addDoc(collection(db, 'revisions'), {
+          componentId: docIdRef.current, pageId: id,
+          originalContent: origRef.current, proposedContent: v,
+          createdBy: user.uid, createdByName: profile?.displayName,
+          status: 'pending', submitted: submit,
+          createdAt: serverTimestamp(), updatedAt: serverTimestamp()
+        });
+        draftRevIdRef.current = r.id;
+      }
+      if (submit) {
+        await logActivity({ userId: user.uid, userName: profile?.displayName, action: 'suggested edit', targetType: 'revision', targetId: id, targetTitle: page?.title });
+        const admins = await getDocs(query(collection(db, 'users'), where('role', '==', 'admin')));
+        for (const a of admins.docs) {
+          await notifyUser({ userId: a.id, title: `${profile?.displayName} suggested an edit to "${page?.title}"`, body: '', link: `/pages/${id}` });
+        }
+        setSuggestMode(false); setDraft(''); draftRevIdRef.current = null; setDraftState('');
+        load();
+      } else {
+        setDraftState('Draft auto-saved to cloud — visible to the team below');
+      }
+    } catch { setDraftState('Draft save failed — check connection, keep typing'); }
+  };
+
+  const submitSuggestion = () => {
+    if (!docIdRef.current) { alert('No official document yet — ask the supervisor to create it first.'); return; }
+    clearTimeout(draftTimer.current);
+    upsertDraft(draft, true);
   };
 
   // Import a .docx file prepared offline; keeps headings/bold/lists/tables/images
@@ -147,6 +244,8 @@ export default function PageView() {
         setNotice('Word file imported and saved.');
         await logActivity({ userId: user.uid, userName: profile?.displayName, action: 'imported Word file', targetType: 'page', targetId: id, targetTitle: file.name });
       } else {
+        origRef.current = htmlRef.current;
+        draftRevIdRef.current = null;
         setDraft(value);
         setSuggestMode(true);
         setNotice('Word file loaded into your suggestion draft — review then Submit.');
@@ -155,33 +254,12 @@ export default function PageView() {
     setImporting(false);
   };
 
-  const submitSuggestion = async () => {
-    const c = docComp || docIdRef.current;
-    if (!c) { alert('No official document yet — ask the supervisor to create it first.'); return; }
-    const targetId = typeof c === 'string' ? c : c.id;
-    const originalContent = (typeof c === 'object' && c.content?.html) || htmlRef.current;
-    await addDoc(collection(db, 'revisions'), {
-      componentId: targetId, pageId: id,
-      originalContent,
-      proposedContent: draft || htmlRef.current,
-      createdBy: user.uid, createdByName: profile?.displayName,
-      status: 'pending', createdAt: serverTimestamp()
-    });
-    await logActivity({ userId: user.uid, userName: profile?.displayName, action: 'suggested edit', targetType: 'revision', targetId: id, targetTitle: page?.title });
-    // notify all admins (simple: notification per admin user doc)
-    const admins = await getDocs(query(collection(db, 'users'), where('role', '==', 'admin')));
-    for (const a of admins.docs) {
-      await notifyUser({ userId: a.id, title: `${profile?.displayName} suggested an edit to "${page?.title}"`, body: '', link: `/pages/${id}` });
-    }
-    setSuggestMode(false); setDraft(''); load();
-  };
-
   const review = async (rev, decision) => {
     await updateDoc(doc(db, 'revisions', rev.id), {
       status: decision, reviewedBy: user.uid, reviewedByName: profile?.displayName, reviewedAt: serverTimestamp()
     });
     if (decision === 'accepted') {
-      await updateDoc(doc(db, 'components', rev.componentId), { content: { html: rev.proposedContent }, updatedAt: serverTimestamp() });
+      await updateDoc(doc(db, 'components', rev.componentId), { content: { html: rev.proposedContent }, updatedAt: serverTimestamp(), updatedByName: profile?.displayName });
       htmlRef.current = rev.proposedContent;
       setHtml(rev.proposedContent);
       await touchPage(id);
@@ -201,11 +279,20 @@ export default function PageView() {
   const canDeleteFile = (f) => isAdmin || f.uploadedBy === user?.uid;
 
   if (!page) return <Layout><div>Loading...</div></Layout>;
+  const pendingCount = revisions.filter((r) => r.status === 'pending').length;
   return (
     <Layout>
       <h2>Page: {page.title}</h2>
-      <div className="meta">Status: <span className={saveState === 'Saved' ? 'status-saved' : 'status-saving'}>{isAdmin ? saveState : 'Members propose edits via Suggest'}</span></div>
+      <div className="meta">
+        Status: <span className={saveState === 'Saved' ? 'status-saved' : 'status-saving'}>{isAdmin ? saveState : 'Members propose edits via Suggest (drafts auto-save to cloud)'}</span>
+        {docComp?.updatedAt && <span> — Last cloud save: {fmtTime(docComp.updatedAt)}{docComp.updatedByName ? ` by ${docComp.updatedByName}` : ''}</span>}
+      </div>
       {notice && <div className="card" style={{ borderColor: '#f0c36d', background: '#fefce8' }}>{notice}</div>}
+      {isAdmin && docCount > 1 && (
+        <div className="card" style={{ borderColor: '#f0c36d' }}>
+          Found {docCount} copies of this document (parallel edits). <button className="btn primary" onClick={mergeDuplicates}>Merge duplicates</button>
+        </div>
+      )}
 
       <div className="card">
         <div className="row" style={{ marginBottom: 10 }}>
@@ -220,14 +307,14 @@ export default function PageView() {
         {isAdmin
           ? <DocEditor value={html} onChange={onEdit} editable />
           : <DocEditor value={html} editable={false} />}
-        {!isAdmin && !suggestMode && <button className="btn primary" onClick={() => { setDraft(htmlRef.current); setSuggestMode(true); }}>Suggest an edit</button>}
+        {!isAdmin && !suggestMode && <button className="btn primary" onClick={openSuggest}>Suggest an edit</button>}
         {!isAdmin && suggestMode && (
           <div style={{ marginTop: 10 }}>
-            <div className="meta">Edit a copy below — the original stays unchanged until the supervisor accepts.</div>
-            <DocEditor value={draft} onChange={setDraft} editable />
+            <div className="meta">Edit a copy below — it auto-saves to the cloud as your draft and stays visible to the team until the supervisor accepts. <span className={draftState.includes('failed') ? 'status-saving' : 'status-saved'}>{draftState}</span></div>
+            <DocEditor value={draft} onChange={onDraftChange} editable />
             <div className="row" style={{ marginTop: 8 }}>
               <button className="btn primary" onClick={submitSuggestion}>Submit suggestion</button>
-              <button className="btn" onClick={() => setSuggestMode(false)}>Cancel</button>
+              <button className="btn" onClick={() => { clearTimeout(draftTimer.current); setSuggestMode(false); }}>Close (draft kept)</button>
             </div>
           </div>
         )}
@@ -238,10 +325,10 @@ export default function PageView() {
         <button className="btn" onClick={() => exportToDocx([{ title: page.title, html: htmlRef.current }], `${page.title}.docx`)}>Export Word (.docx)</button>
       </div>
 
-      <h3>Suggested Revisions {revisions.filter((r) => r.status === 'pending').length > 0 && `(${revisions.filter((r) => r.status === 'pending').length} pending)`}</h3>
+      <h3>Suggested Revisions {pendingCount > 0 && `(${pendingCount} pending)`}</h3>
       {revisions.map((r) => (
         <div key={r.id} className="card">
-          <div className="meta">{r.createdByName} suggested an edit — status: <strong>{r.status}</strong></div>
+          <div className="meta">{r.createdByName} — {r.submitted === false ? 'draft (auto-saved, not submitted)' : 'submitted'} — status: <strong>{r.status}</strong></div>
           <DiffViewer original={r.originalContent} suggested={r.proposedContent} />
           {isAdmin && r.status === 'pending' && (
             <div className="row">
@@ -258,7 +345,7 @@ export default function PageView() {
           <thead><tr><th>User</th><th>Action</th><th>Status</th></tr></thead>
           <tbody>
             {revisions.map((r) => (
-              <tr key={r.id}><td>{r.createdByName}</td><td>Suggested edit{isAdmin && r.reviewedByName ? ` — reviewed by ${r.reviewedByName}` : ''}</td><td>{r.status}</td></tr>
+              <tr key={r.id}><td>{r.createdByName}</td><td>{r.submitted === false ? 'Drafting suggestion' : 'Suggested edit'}{isAdmin && r.reviewedByName ? ` — reviewed by ${r.reviewedByName}` : ''}</td><td>{r.status}</td></tr>
             ))}
           </tbody>
         </table>
