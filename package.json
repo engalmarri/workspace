@@ -26,7 +26,6 @@
     "@tiptap/extension-highlight": "^2.4.0",
     "@tiptap/extension-text-style": "^2.4.0",
     "@tiptap/extension-color": "^2.4.0",
-    "@tiptap/extension-font-size": "^2.2.3",
     "diff": "^7.0.0",
     "docx": "^8.5.0",
     "html2pdf.js": "^0.10.1",

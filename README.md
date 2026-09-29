@@ -37,6 +37,18 @@ React + Vite + Firebase (project: `graduation-project-workspace`), GitHub-hosted
    Or run `node scripts/seed.mjs` with a service account (see file header).
 7. Login as admin > Admin Panel > "Seed default pages" + add the 5 members.
 
+## Deploy (Cloudflare Pages)
+
+1. Push the repo to GitHub.
+2. Cloudflare Dashboard > Pages > Create > Connect to Git > select the repo.
+3. Build settings: Framework preset `Vite`, Build command `npm run build`,
+   Output directory `dist`, Root directory `/` (repo root = this folder's contents).
+4. **Environment variables (Production + Preview)** — copy from local `.env`:
+   `VITE_FB_API_KEY`, `VITE_FB_AUTH_DOMAIN`, `VITE_FB_PROJECT_ID`,
+   `VITE_FB_STORAGE_BUCKET`, `VITE_FB_SENDER_ID`, `VITE_FB_APP_ID`.
+   Without these the app builds but cannot reach Firebase.
+5. Deploy. SPA fallback is handled by `public/_redirects`.
+
 ## Deploy (GitHub + Firebase Hosting)
 
 1. Push this folder to GitHub.
