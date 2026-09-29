@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { addDoc, collection, doc, getDoc, getDocs, query, serverTimestamp, updateDoc, where } from 'firebase/firestore';
-import { db } from '../firebase.js';
+import { addDoc, collection, deleteDoc, doc, getDoc, getDocs, query, serverTimestamp, updateDoc, where } from 'firebase/firestore';
+import { deleteObject, ref } from 'firebase/storage';
+import { db, storage } from '../firebase.js';
 import Layout from '../components/Layout.jsx';
 import DocEditor from '../components/DocEditor.jsx';
 import DiffViewer from '../components/DiffViewer.jsx';
@@ -107,6 +108,15 @@ export default function PageView() {
     load();
   };
 
+  const removeFile = async (f) => {
+    if (!confirm(`Delete ${f.name}?`)) return;
+    try { if (f.path) await deleteObject(ref(storage, f.path)); } catch { /* ignore */ }
+    await deleteDoc(doc(db, 'files', f.id));
+    await logActivity({ userId: user.uid, userName: profile?.displayName, action: 'deleted file', targetType: 'file', targetId: id, targetTitle: f.name });
+    load();
+  };
+  const canDeleteFile = (f) => isAdmin || f.uploadedBy === user?.uid;
+
   if (!page) return <Layout><div>Loading...</div></Layout>;
   return (
     <Layout>
@@ -132,7 +142,7 @@ export default function PageView() {
       </div>
 
       <div className="row">
-        <button className="btn" onClick={() => exportToPdf('export-root', `${page.title}.pdf`)}>Export PDF</button>
+        <button className="btn" onClick={() => exportToPdf(page.title, html, `${page.title}.pdf`)}>Export PDF</button>
         <button className="btn" onClick={() => exportToDocx([{ title: page.title, html }], `${page.title}.docx`)}>Export Word (.docx)</button>
       </div>
 
@@ -168,7 +178,9 @@ export default function PageView() {
       <div className="card">
         <h4>Files</h4>
         {files.map((f) => (
-          <div key={f.id} className="meta">{f.name} ({Math.round((f.size || 0) / 1024)} KB) — Uploaded by {f.uploadedByName} — <a href={f.url} target="_blank" rel="noreferrer">Download</a></div>
+          <div key={f.id} className="meta">{f.name} ({Math.round((f.size || 0) / 1024)} KB) — Uploaded by {f.uploadedByName} — <a href={f.url} target="_blank" rel="noreferrer">Download</a>
+            {canDeleteFile(f) && <> — <button className="btn small danger" onClick={() => removeFile(f)}>Delete</button></>}
+          </div>
         ))}
       </div>
     </Layout>

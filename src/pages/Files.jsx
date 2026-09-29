@@ -7,7 +7,7 @@ import FileUploader from '../components/FileUploader.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 
 export default function Files() {
-  const { isAdmin } = useAuth();
+  const { user, isAdmin } = useAuth();
   const [files, setFiles] = useState([]);
   const load = async () => {
     const s = await getDocs(query(collection(db, 'files'), orderBy('createdAt', 'desc')));
@@ -32,7 +32,7 @@ export default function Files() {
           <div className="row" style={{ marginTop: 6 }}>
             {previewable(f.name) && <a className="btn small" href={f.url} target="_blank" rel="noreferrer">Preview</a>}
             <a className="btn small" href={f.url} target="_blank" rel="noreferrer">Download</a>
-            {isAdmin && <button className="btn small danger" onClick={() => remove(f)}>Delete</button>}
+            {(isAdmin || f.uploadedBy === user?.uid) && <button className="btn small danger" onClick={() => remove(f)}>Delete</button>}
           </div>
         </div>
       ))}
