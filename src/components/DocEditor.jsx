@@ -11,7 +11,7 @@ import TableHeader from '@tiptap/extension-table-header';
 import TableCell from '@tiptap/extension-table-cell';
 import TextStyle from '@tiptap/extension-text-style';
 import Color from '@tiptap/extension-color';
-import FontSize from '@tiptap/extension-font-size';
+import FontSize from './fontSizeExt.js';
 import { useEffect } from 'react';
 
 export default function DocEditor({ value, onChange, editable = true }) {
