@@ -1,12 +1,13 @@
 import { useState } from 'react';
-import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
-import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
+import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
+import { addDoc, collection, deleteDoc, doc, serverTimestamp } from 'firebase/firestore';
 import { db, storage } from '../firebase.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import { logActivity } from '../services/helpers.js';
+import Icon from './icons.jsx';
 
 export default function ImageGallery({ pageId, images, onChanged }) {
-  const { user, profile } = useAuth();
+  const { user, profile, isAdmin } = useAuth();
   const [desc, setDesc] = useState('');
   const [progress, setProgress] = useState(0);
   const [zoom, setZoom] = useState(null);
@@ -21,13 +22,22 @@ export default function ImageGallery({ pageId, images, onChanged }) {
       async () => {
         const url = await getDownloadURL(task.snapshot.ref);
         await addDoc(collection(db, 'components'), {
-          pageId: pageId || '', type: 'image', content: { url, description: desc },
+          pageId: pageId || '', type: 'image', content: { url, description: desc, path },
           createdBy: user.uid, createdByName: profile?.displayName || profile?.email,
           createdAt: serverTimestamp(), updatedAt: serverTimestamp()
         });
         await logActivity({ userId: user.uid, userName: profile?.displayName, action: 'added image', targetType: 'image', targetId: pageId, targetTitle: desc });
         setDesc(''); setProgress(0); onChanged && onChanged();
       });
+  };
+
+  const canDelete = (c) => isAdmin || c.createdBy === user?.uid;
+  const remove = async (c) => {
+    if (!confirm('Delete this image?')) return;
+    try { if (c.content?.path) await deleteObject(ref(storage, c.content.path)); } catch { /* file may be legacy without path */ }
+    await deleteDoc(doc(db, 'components', c.id));
+    await logActivity({ userId: user.uid, userName: profile?.displayName, action: 'deleted image', targetType: 'image', targetId: pageId, targetTitle: c.content?.description });
+    onChanged && onChanged();
   };
 
   return (
@@ -44,6 +54,10 @@ export default function ImageGallery({ pageId, images, onChanged }) {
             <img src={c.content?.url} alt={c.content?.description || ''} onClick={() => setZoom(c.content?.url)} />
             <div className="meta">{c.content?.description}</div>
             <div className="meta">Added by: {c.createdByName}</div>
+            {canDelete(c) && (
+              <button className="btn small danger" style={{ marginTop: 4 }} title="Delete image"
+                onClick={() => remove(c)}><Icon name="trash" /> Delete</button>
+            )}
           </div>
         ))}
       </div>

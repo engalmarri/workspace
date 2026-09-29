@@ -12,9 +12,18 @@ import TableCell from '@tiptap/extension-table-cell';
 import TextStyle from '@tiptap/extension-text-style';
 import Color from '@tiptap/extension-color';
 import FontSize from './fontSizeExt.js';
-import { useEffect } from 'react';
+import Icon from './icons.jsx';
+import { useEffect, useRef, useState } from 'react';
+
+// A4 content height per page in px (297mm - 22mm top - 22mm bottom padding at 96dpi)
+const MM = 96 / 25.4;
+const PAGE_CONTENT_PX = 253 * MM;
+const PAD_TOP_PX = 22 * MM;
 
 export default function DocEditor({ value, onChange, editable = true }) {
+  const wrapRef = useRef(null);
+  const [pageCount, setPageCount] = useState(1);
+
   const editor = useEditor({
     editable,
     extensions: [
@@ -25,62 +34,130 @@ export default function DocEditor({ value, onChange, editable = true }) {
       TextStyle, Color, FontSize
     ],
     content: value || '<p></p>',
-    onUpdate: ({ editor }) => onChange && onChange(editor.getHTML())
+    onUpdate: ({ editor }) => {
+      onChange && onChange(editor.getHTML());
+      measure();
+    }
   });
+
+  const measure = () => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const contentH = Math.max(0, el.scrollHeight - PAD_TOP_PX * 2);
+    setPageCount(Math.max(1, Math.ceil(contentH / PAGE_CONTENT_PX)));
+  };
 
   useEffect(() => {
     if (editor && value !== undefined && editor.getHTML() !== value && !editor.isFocused) {
       editor.commands.setContent(value || '<p></p>');
+      setTimeout(measure, 0);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value]);
   useEffect(() => { editor && editor.setEditable(editable); }, [editor, editable]);
+  useEffect(() => {
+    measure();
+    const el = wrapRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editor]);
+
   if (!editor) return null;
 
-  const btn = (fn, label, on) => (
-    <button type="button" className={on ? 'on' : ''} onMouseDown={(e) => { e.preventDefault(); fn(); }}>{label}</button>
+  const tool = (fn, icon, title, on) => (
+    <button type="button" className={'tool' + (on ? ' on' : '')} title={title}
+      onMouseDown={(e) => { e.preventDefault(); fn(); }}>
+      <Icon name={icon} />
+    </button>
   );
+
   return (
     <div>
       {editable && (
-        <div className="toolbar">
-          {btn(() => editor.chain().focus().toggleBold().run(), 'B', editor.isActive('bold'))}
-          {btn(() => editor.chain().focus().toggleItalic().run(), 'I', editor.isActive('italic'))}
-          {btn(() => editor.chain().focus().toggleUnderline().run(), 'U', editor.isActive('underline'))}
-          {btn(() => editor.chain().focus().toggleHighlight().run(), 'Mark', editor.isActive('highlight'))}
-          {btn(() => editor.chain().focus().toggleHeading({ level: 1 }).run(), 'H1', editor.isActive('heading', { level: 1 }))}
-          {btn(() => editor.chain().focus().toggleHeading({ level: 2 }).run(), 'H2', editor.isActive('heading', { level: 2 }))}
-          {btn(() => editor.chain().focus().toggleHeading({ level: 3 }).run(), 'H3', editor.isActive('heading', { level: 3 }))}
-          {btn(() => editor.chain().focus().setTextAlign('left').run(), 'Left', editor.isActive({ textAlign: 'left' }))}
-          {btn(() => editor.chain().focus().setTextAlign('center').run(), 'Center', editor.isActive({ textAlign: 'center' }))}
-          {btn(() => editor.chain().focus().setTextAlign('right').run(), 'Right', editor.isActive({ textAlign: 'right' }))}
-          {btn(() => editor.chain().focus().setTextAlign('justify').run(), 'Justify', editor.isActive({ textAlign: 'justify' }))}
-          {btn(() => editor.chain().focus().toggleBulletList().run(), 'Bullets', editor.isActive('bulletList'))}
-          {btn(() => editor.chain().focus().toggleOrderedList().run(), '1.2.3', editor.isActive('orderedList'))}
-          {btn(() => editor.chain().focus().undo().run(), 'Undo')}
-          {btn(() => editor.chain().focus().redo().run(), 'Redo')}
-          <select defaultValue="" onChange={(e) => { const v = e.target.value; if (v) editor.chain().focus().setColor(v).run(); }} title="Text color">
-            <option value="">Color</option>
-            <option value="#000000">Black</option><option value="#b91c1c">Red</option>
-            <option value="#2563eb">Blue</option><option value="#15803d">Green</option>
-          </select>
-          <button type="button" onClick={() => {
-            const url = prompt('Image URL (or upload via Images component):'); if (url) editor.chain().focus().setImage({ src: url }).run();
-          }}>Image</button>
-          <button type="button" onClick={() => {
-            const url = prompt('Link URL:'); if (url) editor.chain().focus().setLink({ href: url }).run();
-          }}>Link</button>
-          <button type="button" onClick={() => editor.chain().focus().insertTable({ rows: 3, cols: 3 }).run()}>Table</button>
-          <button type="button" onClick={() => editor.chain().focus().addColumnAfter().run()}>Col+</button>
-          <button type="button" onClick={() => editor.chain().focus().addRowAfter().run()}>Row+</button>
-          <select defaultValue="" title="Font size" onChange={(e) => { const v = e.target.value; if (v) editor.chain().focus().setFontSize(v).run(); e.target.value = ''; }}>
-            <option value="">Size</option>
-            <option value="12px">12</option><option value="14px">14</option><option value="16px">16</option>
-            <option value="20px">20</option><option value="24px">24</option><option value="28px">28</option>
-          </select>
+        <div className="ribbon">
+          <div className="ribbon-tabs"><span className="ribbon-tab active">Home</span></div>
+          <div className="ribbon-groups">
+            <div className="ribbon-group">
+              <div className="ribbon-controls">
+                {tool(() => editor.chain().focus().toggleBold().run(), 'bold', 'Bold', editor.isActive('bold'))}
+                {tool(() => editor.chain().focus().toggleItalic().run(), 'italic', 'Italic', editor.isActive('italic'))}
+                {tool(() => editor.chain().focus().toggleUnderline().run(), 'underline', 'Underline', editor.isActive('underline'))}
+                <label className="tool color-tool" title="Font color">
+                  <span className="color-a">A</span><span className="color-bar" style={{ background: editor.getAttributes('textStyle').color || '#1f2328' }} />
+                  <input type="color" value={editor.getAttributes('textStyle').color || '#1f2328'}
+                    onChange={(e) => editor.chain().focus().setColor(e.target.value).run()} />
+                </label>
+                <label className="tool color-tool" title="Highlight color">
+                  <span className="hl-mark">ab</span>
+                  <input type="color" defaultValue="#ffff00"
+                    onChange={(e) => editor.chain().focus().toggleHighlight({ color: e.target.value }).run()} />
+                </label>
+                <select className="tool-select" title="Font size" defaultValue=""
+                  onChange={(e) => { const v = e.target.value; if (v) editor.chain().focus().setFontSize(v).run(); e.target.value = ''; }}>
+                  <option value="">Size</option>
+                  <option value="12px">12</option><option value="14px">14</option><option value="16px">16</option>
+                  <option value="18px">18</option><option value="20px">20</option><option value="24px">24</option>
+                  <option value="28px">28</option>
+                </select>
+              </div>
+              <div className="ribbon-label">Font</div>
+            </div>
+            <div className="ribbon-group">
+              <div className="ribbon-controls">
+                {tool(() => editor.chain().focus().toggleHeading({ level: 1 }).run(), 'h1', 'Heading 1', editor.isActive('heading', { level: 1 }))}
+                {tool(() => editor.chain().focus().toggleHeading({ level: 2 }).run(), 'h2', 'Heading 2', editor.isActive('heading', { level: 2 }))}
+                {tool(() => editor.chain().focus().toggleHeading({ level: 3 }).run(), 'h3', 'Heading 3', editor.isActive('heading', { level: 3 }))}
+              </div>
+              <div className="ribbon-label">Styles</div>
+            </div>
+            <div className="ribbon-group">
+              <div className="ribbon-controls">
+                {tool(() => editor.chain().focus().setTextAlign('left').run(), 'alignLeft', 'Align left', editor.isActive({ textAlign: 'left' }))}
+                {tool(() => editor.chain().focus().setTextAlign('center').run(), 'alignCenter', 'Center', editor.isActive({ textAlign: 'center' }))}
+                {tool(() => editor.chain().focus().setTextAlign('right').run(), 'alignRight', 'Align right', editor.isActive({ textAlign: 'right' }))}
+                {tool(() => editor.chain().focus().setTextAlign('justify').run(), 'alignJustify', 'Justify', editor.isActive({ textAlign: 'justify' }))}
+                {tool(() => editor.chain().focus().toggleBulletList().run(), 'bullets', 'Bullets', editor.isActive('bulletList'))}
+                {tool(() => editor.chain().focus().toggleOrderedList().run(), 'numbered', 'Numbering', editor.isActive('orderedList'))}
+              </div>
+              <div className="ribbon-label">Paragraph</div>
+            </div>
+            <div className="ribbon-group">
+              <div className="ribbon-controls">
+                <button type="button" className="tool" title="Insert image (URL)" onClick={() => {
+                  const url = prompt('Image URL (or upload via Images component):'); if (url) editor.chain().focus().setImage({ src: url }).run();
+                }}><Icon name="image" /></button>
+                <button type="button" className="tool" title="Insert link" onClick={() => {
+                  const url = prompt('Link URL:'); if (url) editor.chain().focus().setLink({ href: url }).run();
+                }}><Icon name="link" /></button>
+                {tool(() => editor.chain().focus().insertTable({ rows: 3, cols: 3 }).run(), 'table', 'Insert table')}
+                {tool(() => editor.chain().focus().addColumnAfter().run(), 'colPlus', 'Add column')}
+                {tool(() => editor.chain().focus().addRowAfter().run(), 'rowPlus', 'Add row')}
+              </div>
+              <div className="ribbon-label">Insert</div>
+            </div>
+            <div className="ribbon-group">
+              <div className="ribbon-controls">
+                {tool(() => editor.chain().focus().undo().run(), 'undo', 'Undo')}
+                {tool(() => editor.chain().focus().redo().run(), 'redo', 'Redo')}
+              </div>
+              <div className="ribbon-label">History</div>
+            </div>
+          </div>
         </div>
       )}
-      <div className="a4"><EditorContent editor={editor} /></div>
+      <div className="a4-flow">
+        <div className="a4" ref={wrapRef}>
+          <EditorContent editor={editor} />
+          {Array.from({ length: Math.max(0, pageCount - 1) }, (_, i) => (
+            <div key={i} className="page-break" style={{ top: `calc(22mm + ${(i + 1) * 253}mm)` }}>
+              <span>Page {i + 2}</span>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
