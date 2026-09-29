@@ -44,6 +44,16 @@ service cloud.firestore {
       allow update, delete: if isAdmin()
         || (isMember() && resource.data.uploadedBy == request.auth.uid);
     }
+    // Page Word files: official versions + member suggested copies.
+    // Originals and history are never overwritten; accept creates a new official version.
+    match /pageDocs/{docId} {
+      allow read: if isMember();
+      allow create: if isMember();
+      allow update: if isAdmin();
+      allow delete: if isAdmin()
+        || (isMember() && resource.data.uploadedBy == request.auth.uid
+            && resource.data.status == 'pending');
+    }
     match /activityLogs/{logId} {
       allow read: if isMember();
       allow create: if isMember();

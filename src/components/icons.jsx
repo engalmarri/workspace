@@ -32,7 +32,8 @@ const paths = {
   eye: <React.Fragment><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" /><circle cx="12" cy="12" r="3" /></React.Fragment>,
   plus: <path d="M12 5v14 M5 12h14" />,
   check: <path d="M4 12l5 5L20 6" />,
-  x: <path d="M6 6l12 12 M18 6L6 18" />
+  x: <path d="M6 6l12 12 M18 6L6 18" />,
+  word: <React.Fragment><path d="M6 3h8l4 4v14H6z" /><path d="M14 3v4h4" /><path d="M9.5 13l1.2 4.5L12 14l1.3 3.5L14.5 13" /></React.Fragment>
 };
 
 export default function Icon({ name }) {

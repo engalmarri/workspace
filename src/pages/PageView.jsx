@@ -10,6 +10,7 @@ import DiffViewer from '../components/DiffViewer.jsx';
 import ImageGallery from '../components/ImageGallery.jsx';
 import VideoLinks from '../components/VideoLinks.jsx';
 import FileUploader from '../components/FileUploader.jsx';
+import PageWordFiles from '../components/PageWordFiles.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 import { logActivity, notifyUser, touchPage } from '../services/helpers.js';
 import { exportToDocx, exportToPdf } from '../utils/exportDoc.js';
@@ -319,6 +320,8 @@ export default function PageView() {
           </div>
         )}
       </div>
+
+      <PageWordFiles pageId={id} pageTitle={page.title} />
 
       <div className="row">
         <button className="btn" onClick={() => exportToPdf(page.title, htmlRef.current, `${page.title}.pdf`)}>Export PDF</button>
